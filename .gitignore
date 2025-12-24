@@ -1,0 +1,19 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# Entornos virtuales
+venv/
+.venv/
+
+# Logs / temporales
+*.log
+.DS_Store
+Thumbs.db
