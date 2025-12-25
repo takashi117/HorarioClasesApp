@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QLabel, QPushButton, 
-                               QTabWidget, QFrame, QListWidget, QMessageBox)
+                               QTabWidget, QFrame, QListWidget, QMessageBox, QListWidgetItem)
 from PySide6.QtCore import Qt
 from ui.dialogs import DialogoMateria
 from ui.grid_widget import HorarioGrid
@@ -93,11 +93,20 @@ class VentanaPrincipal(QMainWindow):
                 QMessageBox.critical(self, "Error", "No se pudo guardar la materia")
 
     def cargar_lista_materias(self):
-        """Consulta la BD y llena la lista visual"""
+        """Llena la lista visual (Ocultando el ID al usuario)"""
         self.lista_materias.clear()
         materias = database.obtener_todas_las_materias()
+        
+        contador = 1 # Contador visual
         for id_mat, nombre in materias:
-            self.lista_materias.addItem(f"{id_mat} - {nombre}")
+            # Como ya importamos QListWidgetItem arriba, lo usamos directo
+            item = QListWidgetItem(f"{contador}. {nombre}")
+            
+            # Guardamos el ID real en "UserRole" (secreto para el usuario, util para nosotros)
+            item.setData(Qt.UserRole, id_mat) 
+            
+            self.lista_materias.addItem(item)
+            contador += 1
 
     def eliminar_materia_seleccionada(self):
         # 1. Verificar si hay algo seleccionado
@@ -106,40 +115,40 @@ class VentanaPrincipal(QMainWindow):
             QMessageBox.warning(self, "Atencion", "Selecciona una materia de la lista para borrar.")
             return
             
-        # 2. Obtener el ID del texto (Ej: "1 - Matematicas")
-        texto = item_actual.text()
-        id_materia = texto.split(' - ')[0] # Tomamos lo que esta antes del guion
+        # 2. RECUPERAR EL ID OCULTO
+        # Usamos .data(Qt.UserRole) porque el texto visual ya no tiene el ID real
+        id_materia = item_actual.data(Qt.UserRole)
+        nombre_para_mostrar = item_actual.text() 
         
-        # 3. Preguntar confirmacion (Buena practica de UX)
+        # 3. Preguntar confirmacion
         respuesta = QMessageBox.question(
             self, "Confirmar", 
-            f"Estas seguro de borrar la materia {id_materia}?",
+            f"Estas seguro de borrar la materia '{nombre_para_mostrar}'?",
             QMessageBox.Yes | QMessageBox.No
         )
         
         if respuesta == QMessageBox.Yes:
+            # Pasamos el ID real a la base de datos
             if database.eliminar_materia(id_materia):
                 # 4. Refrescar todo
-                self.cargar_lista_materias()
-                
-                # Si ya tienes implementado el grid del paso anterior, descomenta esto:
-                self.actualizar_vista_global() 
+                self.cargar_lista_materias()     # Actualiza la lista lateral
+                self.actualizar_vista_global()   # Actualiza el Grid de colores (Ya descomentado)
                 
                 QMessageBox.information(self, "Listo", "Materia eliminada.")
             else:
                 QMessageBox.critical(self, "Error", "No se pudo eliminar.")
 
     def actualizar_vista_global(self):
-        """Lee TODAS las materias de la BD y las pinta en el grid global"""
+        """Lee TODAS las materias y las pinta."""
         self.grid_global.limpiar()
         conn = database.crear_conexion()
         if not conn: return
         
         try:
             cursor = conn.cursor()
-            # Obtenemos Materia, Dia y Horas uniendo las 3 tablas
+            # AHORA PEDIMOS TAMBIEN PROFESOR Y SALON
             query = """
-                SELECT m.nombre, b.dia, b.hora_inicio, b.hora_fin
+                SELECT m.nombre, o.profesor, o.salon, b.dia, b.hora_inicio, b.hora_fin
                 FROM bloques b
                 JOIN opciones o ON b.opcion_id = o.id
                 JOIN materias m ON o.materia_id = m.id
@@ -147,15 +156,15 @@ class VentanaPrincipal(QMainWindow):
             cursor.execute(query)
             filas = cursor.fetchall()
             
-            # Diccionario para recordar el color de cada materia
             colores_materias = {}
             
-            for nombre, dia, inicio, fin in filas:
+            # Desempaquetamos los 6 valores
+            for nombre, prof, salon, dia, inicio, fin in filas:
                 if nombre not in colores_materias:
                     colores_materias[nombre] = self.grid_global.generar_color_random()
                 
-                # Usamos la funcion del grid para pintar
-                self.grid_global.pintar_bloque(nombre, dia, inicio, fin, colores_materias[nombre])
+                # Pasamos todos los datos al grid
+                self.grid_global.pintar_bloque(nombre, prof, salon, dia, inicio, fin, colores_materias[nombre])
                 
         except Exception as e:
             print(f"Error al leer datos para el grid: {e}")
