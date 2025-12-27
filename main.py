@@ -2,6 +2,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from ui.main_window import VentanaPrincipal
 import database
+import engine
 
 def main():
     # 1. Asegurar que la base de datos existe
