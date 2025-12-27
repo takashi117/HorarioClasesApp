@@ -12,6 +12,7 @@ class Bloque:
 @dataclass
 class Opcion:
     id_opcion: int
+    nombre_materia: str
     profesor: str
     salon: str
     bloques: List[Bloque] # Una opcion puede tener varios bloques (Lunes y Miercoles)
@@ -36,18 +37,24 @@ def minutos_a_hora(minutos: int) -> str:
     return f"{h:02d}:{m:02d}"
 
 def hay_choque(bloque1: Bloque, bloque2: Bloque) -> bool:
-    """
-    Retorna True si dos bloques de tiempo se solapan.
-    Logica: Si es el mismo dia y los rangos de tiempo se cruzan.
-    """
+    """Retorna True si dos bloques se solapan."""
     if bloque1.dia != bloque2.dia:
         return False
     
-    # Formula matematica de solapamiento: max(inicio1, inicio2) < min(fin1, fin2)
+    # Formula matematica: max(inicio1, inicio2) < min(fin1, fin2)
     inicio_max = max(bloque1.hora_inicio, bloque2.hora_inicio)
     fin_min = min(bloque1.hora_fin, bloque2.hora_fin)
     
-    return inicio_max < fin_min
+    choca = inicio_max < fin_min
+    
+    # --- DEBUG: Si hay choque, avisa en consola ---
+    if choca:
+        print(f"   CONFLICTO DETECTADO: {bloque1.dia}")
+        print(f"   Bloque A: {minutos_a_hora(bloque1.hora_inicio)} - {minutos_a_hora(bloque1.hora_fin)}")
+        print(f"   Bloque B: {minutos_a_hora(bloque2.hora_inicio)} - {minutos_a_hora(bloque2.hora_fin)}")
+    # ----------------------------------------------
+    
+    return choca
 
 def validar_horario(horario_actual: List[Opcion], nueva_opcion: Opcion) -> bool:
     """Revisa si la nueva_opcion choca con algo que ya esta en el horario."""
