@@ -119,19 +119,28 @@ class VentanaPrincipal(QMainWindow):
 
     def abrir_dialogo_agregar(self):
         dialogo = DialogoMateria(self)
-        if dialogo.exec(): 
+        if dialogo.exec():
             datos = dialogo.obtener_datos()
-            if database.insertar_materia_completa(datos):
-                self.cargar_lista_materias() 
+            id_existente = database.obtener_materia_por_nombre(datos['nombre'])
+
+            if id_existente:
+                exito = database.insertar_opcion_para_materia(id_existente, datos)
+                mensaje_exito = "Se agrego una nueva opcion a la materia existente"
+            else:
+                exito = database.insertar_materia_completa(datos)
+                mensaje_exito = "Materia guardada correctamente"
+
+            if exito:
+                self.cargar_lista_materias()
                 self.actualizar_vista_global()
-                QMessageBox.information(self, "Exito", "Materia guardada correctamente")
+                QMessageBox.information(self, "Exito", mensaje_exito)
             else:
                 QMessageBox.critical(self, "Error", "No se pudo guardar la materia")
 
     def cargar_lista_materias(self):
         self.lista_materias.clear()
         materias = database.obtener_todas_las_materias()
-        contador = 1 
+        contador = 1
         for id_mat, nombre in materias:
             item = QListWidgetItem(f"{contador}. {nombre}")
             item.setData(Qt.UserRole, id_mat) 

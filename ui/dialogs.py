@@ -10,6 +10,7 @@ class DialogoMateria(QDialog):
         self.setWindowTitle("Nueva Materia - Horarios Multiples")
         self.setFixedWidth(500) # Un poco mas ancho
         self.bloques_temporales = [] # Aqui guardaremos los horarios antes de guardar en BD
+        self.opcion_id = None
         
         layout = QVBoxLayout(self)
         
@@ -134,6 +135,7 @@ class DialogoMateria(QDialog):
         """Rellena el formulario con datos existentes"""
         self.setWindowTitle("Editar Materia")
         self.btn_guardar.setText("Actualizar Materia")
+        self.opcion_id = datos.get('opcion_id')
         
         # 1. Textos
         self.input_nombre.setText(datos['nombre'])
@@ -153,5 +155,6 @@ class DialogoMateria(QDialog):
             "nombre": self.input_nombre.text(),
             "profesor": self.input_profesor.text(),
             "salon": self.input_salon.text(),
-            "bloques": self.bloques_temporales # Enviamos la lista completa
+            "bloques": self.bloques_temporales, # Enviamos la lista completa
+            "opcion_id": self.opcion_id
         }

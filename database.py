@@ -65,47 +65,70 @@ if __name__ == '__main__':
 
 # --- Funciones de Insercion ---
 
+def _insertar_opcion_y_bloques(cursor, id_materia, datos):
+    """
+    Inserta una opcion (profesor + salon) y sus bloques para una materia
+    existente usando un cursor abierto dentro de una transaccion activa.
+    """
+    sql_opcion = "INSERT INTO opciones (materia_id, profesor, salon) VALUES (?, ?, ?)"
+    cursor.execute(sql_opcion, (id_materia, datos['profesor'], datos['salon']))
+    id_opcion = cursor.lastrowid
+
+    sql_bloque = "INSERT INTO bloques (opcion_id, dia, hora_inicio, hora_fin) VALUES (?, ?, ?, ?)"
+    for bloque in datos['bloques']:
+        cursor.execute(sql_bloque, (
+            id_opcion,
+            bloque['dia'],
+            bloque['inicio'],
+            bloque['fin']
+        ))
+
 def insertar_materia_completa(datos):
     """
     Guarda materia con soporte para multiples bloques de horarios distintos.
-    datos['bloques'] debe ser una lista de diccionarios: 
+    datos['bloques'] debe ser una lista de diccionarios:
     [{'dia': 'Lun', 'inicio': '07:00', 'fin': '09:00'}, ...]
     """
     conn = crear_conexion()
-    if conn is None: return False
-    
+    if conn is None:
+        return False
+
     try:
         cursor = conn.cursor()
-        
+
         # 1. Insertar Materia
         sql_materia = "INSERT INTO materias (nombre) VALUES (?)"
         cursor.execute(sql_materia, (datos['nombre'],))
         id_materia = cursor.lastrowid
-        
+
         # 2. Insertar Opcion (Profesor y Salon)
-        # Nota: Asumimos una opcion por defecto por ahora.
-        sql_opcion = "INSERT INTO opciones (materia_id, profesor, salon) VALUES (?, ?, ?)"
-        cursor.execute(sql_opcion, (id_materia, datos['profesor'], datos['salon']))
-        id_opcion = cursor.lastrowid
-        
-        # 3. Insertar LOS BLOQUES (Aqui esta el cambio mayor)
-        sql_bloque = "INSERT INTO bloques (opcion_id, dia, hora_inicio, hora_fin) VALUES (?, ?, ?, ?)"
-        
-        # Ahora recorremos la lista de bloques que nos manda el dialogo
-        for bloque in datos['bloques']:
-            cursor.execute(sql_bloque, (
-                id_opcion, 
-                bloque['dia'], 
-                bloque['inicio'], 
-                bloque['fin']
-            ))
-            
+        _insertar_opcion_y_bloques(cursor, id_materia, datos)
+
         conn.commit()
         print(f"Materia '{datos['nombre']}' guardada con {len(datos['bloques'])} bloques.")
         return True
-        
+
     except Error as e:
         print(f"Error al insertar: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def insertar_opcion_para_materia(id_materia, datos):
+    """Agrega una nueva opcion (profesor/salon + bloques) a una materia existente."""
+    conn = crear_conexion()
+    if conn is None:
+        return False
+
+    try:
+        cursor = conn.cursor()
+        _insertar_opcion_y_bloques(cursor, id_materia, datos)
+        conn.commit()
+        print(f"Opcion agregada a materia ID {id_materia} con {len(datos['bloques'])} bloques.")
+        return True
+    except Error as e:
+        print(f"Error al insertar opcion: {e}")
         conn.rollback()
         return False
     finally:
@@ -118,7 +141,7 @@ def obtener_todas_las_materias():
     if conn is not None:
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, nombre FROM materias")
+            cursor.execute("SELECT MIN(id) as id, nombre FROM materias GROUP BY nombre")
             materias = cursor.fetchall() # Retorna lista de tuplas [(1, 'Fisica'), (2, 'Calculo')]
         except Error as e:
             print(f"Error al leer: {e}")
@@ -126,14 +149,38 @@ def obtener_todas_las_materias():
             conn.close()
     return materias
 
-def eliminar_materia(id_materia):
-    """Borra una materia y todos sus datos relacionados (Cascade)."""
+def obtener_materia_por_nombre(nombre):
+    """Retorna el ID de la materia cuyo nombre coincide (sin distincion de mayusculas)."""
     conn = crear_conexion()
-    if conn is None: return False
-    
+    if conn is None:
+        return None
+
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM materias WHERE id = ?", (id_materia,))
+        cursor.execute("SELECT id FROM materias WHERE LOWER(nombre) = LOWER(?) LIMIT 1", (nombre,))
+        fila = cursor.fetchone()
+        return fila[0] if fila else None
+    except Error as e:
+        print(f"Error al buscar materia por nombre: {e}")
+        return None
+    finally:
+        conn.close()
+
+def eliminar_materia(id_materia):
+    """Borra una materia y todas sus coincidencias de nombre para evitar duplicados."""
+    conn = crear_conexion()
+    if conn is None:
+        return False
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT nombre FROM materias WHERE id = ?", (id_materia,))
+        fila = cursor.fetchone()
+        if not fila:
+            return False
+
+        nombre = fila[0]
+        cursor.execute("DELETE FROM materias WHERE LOWER(nombre) = LOWER(?)", (nombre,))
         conn.commit()
         return True
     except Error as e:
@@ -144,52 +191,52 @@ def eliminar_materia(id_materia):
 
 def obtener_materia_por_id(id_materia):
     """
-    Recupera toda la estructura de una materia para poder editarla.
-    Retorna un diccionario compatible con el dialogo.
+    Recupera la materia y la primera opcion para poder editarla sin
+    perder otras alternativas ya guardadas.
     """
     conn = crear_conexion()
-    if not conn: return None
-    
+    if not conn:
+        return None
+
     data = {"id": id_materia, "bloques": []}
-    
+
     try:
         cursor = conn.cursor()
-        
-        # 1. Obtener datos basicos (Materia + Opcion)
-        # Asumimos que por ahora solo hay 1 opcion por materia creada desde el UI
+
         query_info = """
-            SELECT m.nombre, o.profesor, o.salon
+            SELECT m.nombre, o.id, o.profesor, o.salon
             FROM materias m
             JOIN opciones o ON o.materia_id = m.id
             WHERE m.id = ?
+            ORDER BY o.id ASC
+            LIMIT 1
         """
         cursor.execute(query_info, (id_materia,))
         fila = cursor.fetchone()
-        
+
         if fila:
             data["nombre"] = fila[0]
-            data["profesor"] = fila[1]
-            data["salon"] = fila[2]
-            
-            # 2. Obtener los bloques de tiempo
+            data["opcion_id"] = fila[1]
+            data["profesor"] = fila[2]
+            data["salon"] = fila[3]
+
             query_bloques = """
                 SELECT b.dia, b.hora_inicio, b.hora_fin
                 FROM bloques b
-                JOIN opciones o ON b.opcion_id = o.id
-                WHERE o.materia_id = ?
+                WHERE b.opcion_id = ?
             """
-            cursor.execute(query_bloques, (id_materia,))
+            cursor.execute(query_bloques, (data["opcion_id"],))
             bloques = cursor.fetchall()
-            
+
             for dia, inicio, fin in bloques:
                 data["bloques"].append({
                     "dia": dia,
                     "inicio": inicio,
                     "fin": fin
                 })
-                
+
         return data
-        
+
     except Error as e:
         print(f"Error al obtener materia: {e}")
         return None
@@ -197,12 +244,44 @@ def obtener_materia_por_id(id_materia):
         conn.close()
 
 def actualizar_materia_existente(id_materia, nuevos_datos):
-    """
-    Truco de Ingeniero: En lugar de hacer UPDATE complejos,
-    es mas seguro borrar la vieja y crear la nueva con el mismo ID 
-    o simplemente borrar y crear una nueva (aunque cambie el ID, es mas facil).
-    
-    Para mantener la integridad, haremos: Eliminar -> Insertar.
-    """
-    eliminar_materia(id_materia) # Ya la tenemos hecha
-    return insertar_materia_completa(nuevos_datos) # Ya la tenemos hecha
+    """Actualiza nombre y la primera opcion de una materia sin borrar las demas."""
+    conn = crear_conexion()
+    if conn is None:
+        return False
+
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("UPDATE materias SET nombre = ? WHERE id = ?", (nuevos_datos['nombre'], id_materia))
+
+        opcion_id = nuevos_datos.get('opcion_id')
+        if opcion_id is None:
+            cursor.execute("SELECT id FROM opciones WHERE materia_id = ? ORDER BY id ASC LIMIT 1", (id_materia,))
+            fila = cursor.fetchone()
+            opcion_id = fila[0] if fila else None
+
+        if opcion_id:
+            cursor.execute("UPDATE opciones SET profesor = ?, salon = ? WHERE id = ?", (
+                nuevos_datos['profesor'], nuevos_datos['salon'], opcion_id
+            ))
+
+            cursor.execute("DELETE FROM bloques WHERE opcion_id = ?", (opcion_id,))
+            sql_bloque = "INSERT INTO bloques (opcion_id, dia, hora_inicio, hora_fin) VALUES (?, ?, ?, ?)"
+            for bloque in nuevos_datos['bloques']:
+                cursor.execute(sql_bloque, (
+                    opcion_id,
+                    bloque['dia'],
+                    bloque['inicio'],
+                    bloque['fin']
+                ))
+        else:
+            _insertar_opcion_y_bloques(cursor, id_materia, nuevos_datos)
+
+        conn.commit()
+        return True
+    except Error as e:
+        print(f"Error al actualizar materia: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
