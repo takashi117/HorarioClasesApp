@@ -85,9 +85,9 @@ def _insertar_opcion_y_bloques(cursor, id_materia, datos):
 
 def insertar_materia_completa(datos):
     """
-    Guarda materia con soporte para multiples bloques de horarios distintos.
-    datos['bloques'] debe ser una lista de diccionarios:
-    [{'dia': 'Lun', 'inicio': '07:00', 'fin': '09:00'}, ...]
+    Guarda una materia con una o varias alternativas de horario.
+    datos['opciones'] debe contener la lista de alternativas; en su defecto
+    se aceptara una estructura plana con 'bloques', 'profesor' y 'salon'.
     """
     conn = crear_conexion()
     if conn is None:
@@ -96,16 +96,15 @@ def insertar_materia_completa(datos):
     try:
         cursor = conn.cursor()
 
-        # 1. Insertar Materia
-        sql_materia = "INSERT INTO materias (nombre) VALUES (?)"
-        cursor.execute(sql_materia, (datos['nombre'],))
+        cursor.execute("INSERT INTO materias (nombre) VALUES (?)", (datos['nombre'],))
         id_materia = cursor.lastrowid
 
-        # 2. Insertar Opcion (Profesor y Salon)
-        _insertar_opcion_y_bloques(cursor, id_materia, datos)
+        opciones = datos.get('opciones') or [datos]
+        for opcion in opciones:
+            _insertar_opcion_y_bloques(cursor, id_materia, opcion)
 
         conn.commit()
-        print(f"Materia '{datos['nombre']}' guardada con {len(datos['bloques'])} bloques.")
+        print(f"Materia '{datos['nombre']}' guardada con {len(opciones)} alternativas.")
         return True
 
     except Error as e:
@@ -115,17 +114,18 @@ def insertar_materia_completa(datos):
     finally:
         conn.close()
 
-def insertar_opcion_para_materia(id_materia, datos):
-    """Agrega una nueva opcion (profesor/salon + bloques) a una materia existente."""
+def insertar_opciones_para_materia(id_materia, opciones):
+    """Agrega una o mas opciones a una materia existente."""
     conn = crear_conexion()
     if conn is None:
         return False
 
     try:
         cursor = conn.cursor()
-        _insertar_opcion_y_bloques(cursor, id_materia, datos)
+        for opcion in opciones:
+            _insertar_opcion_y_bloques(cursor, id_materia, opcion)
         conn.commit()
-        print(f"Opcion agregada a materia ID {id_materia} con {len(datos['bloques'])} bloques.")
+        print(f"Se agregaron {len(opciones)} opciones a la materia ID {id_materia}.")
         return True
     except Error as e:
         print(f"Error al insertar opcion: {e}")
@@ -189,53 +189,54 @@ def eliminar_materia(id_materia):
     finally:
         conn.close()
 
-def obtener_materia_por_id(id_materia):
-    """
-    Recupera la materia y la primera opcion para poder editarla sin
-    perder otras alternativas ya guardadas.
-    """
+def obtener_materia_con_opciones(id_materia):
+    """Recupera la materia y todas sus alternativas con sus bloques."""
     conn = crear_conexion()
     if not conn:
         return None
 
-    data = {"id": id_materia, "bloques": []}
-
     try:
         cursor = conn.cursor()
-
-        query_info = """
-            SELECT m.nombre, o.id, o.profesor, o.salon
-            FROM materias m
-            JOIN opciones o ON o.materia_id = m.id
-            WHERE m.id = ?
-            ORDER BY o.id ASC
-            LIMIT 1
-        """
-        cursor.execute(query_info, (id_materia,))
+        cursor.execute("SELECT nombre FROM materias WHERE id = ?", (id_materia,))
         fila = cursor.fetchone()
+        if not fila:
+            return None
 
-        if fila:
-            data["nombre"] = fila[0]
-            data["opcion_id"] = fila[1]
-            data["profesor"] = fila[2]
-            data["salon"] = fila[3]
+        nombre = fila[0]
+        cursor.execute("SELECT id FROM materias WHERE LOWER(nombre) = LOWER(?) ORDER BY id", (nombre,))
+        ids_materias = [id_row[0] for id_row in cursor.fetchall()]
+        if not ids_materias:
+            return None
 
-            query_bloques = """
-                SELECT b.dia, b.hora_inicio, b.hora_fin
-                FROM bloques b
-                WHERE b.opcion_id = ?
-            """
-            cursor.execute(query_bloques, (data["opcion_id"],))
-            bloques = cursor.fetchall()
+        query_opciones = f"""
+            SELECT o.id, o.profesor, o.salon
+            FROM opciones o
+            WHERE o.materia_id IN ({','.join(['?'] * len(ids_materias))})
+            ORDER BY o.id ASC
+        """
+        cursor.execute(query_opciones, ids_materias)
+        opciones_rows = cursor.fetchall()
 
-            for dia, inicio, fin in bloques:
-                data["bloques"].append({
-                    "dia": dia,
-                    "inicio": inicio,
-                    "fin": fin
-                })
+        resultado = {"id": ids_materias[0], "nombre": nombre, "opciones": []}
 
-        return data
+        for opcion_id, profesor, salon in opciones_rows:
+            cursor.execute(
+                "SELECT dia, hora_inicio, hora_fin FROM bloques WHERE opcion_id = ?",
+                (opcion_id,)
+            )
+            bloques = [
+                {"dia": dia, "inicio": inicio, "fin": fin}
+                for dia, inicio, fin in cursor.fetchall()
+            ]
+
+            resultado["opciones"].append({
+                "id": opcion_id,
+                "profesor": profesor,
+                "salon": salon,
+                "bloques": bloques
+            })
+
+        return resultado
 
     except Error as e:
         print(f"Error al obtener materia: {e}")
@@ -244,7 +245,7 @@ def obtener_materia_por_id(id_materia):
         conn.close()
 
 def actualizar_materia_existente(id_materia, nuevos_datos):
-    """Actualiza nombre y la primera opcion de una materia sin borrar las demas."""
+    """Actualiza la materia y reemplaza todas sus alternativas por las nuevas."""
     conn = crear_conexion()
     if conn is None:
         return False
@@ -252,30 +253,30 @@ def actualizar_materia_existente(id_materia, nuevos_datos):
     try:
         cursor = conn.cursor()
 
-        cursor.execute("UPDATE materias SET nombre = ? WHERE id = ?", (nuevos_datos['nombre'], id_materia))
+        cursor.execute("SELECT nombre FROM materias WHERE id = ?", (id_materia,))
+        fila = cursor.fetchone()
+        if not fila:
+            return False
 
-        opcion_id = nuevos_datos.get('opcion_id')
-        if opcion_id is None:
-            cursor.execute("SELECT id FROM opciones WHERE materia_id = ? ORDER BY id ASC LIMIT 1", (id_materia,))
-            fila = cursor.fetchone()
-            opcion_id = fila[0] if fila else None
+        nombre_actual = fila[0]
+        cursor.execute(
+            "UPDATE materias SET nombre = ? WHERE LOWER(nombre) = LOWER(?)",
+            (nuevos_datos['nombre'], nombre_actual)
+        )
 
-        if opcion_id:
-            cursor.execute("UPDATE opciones SET profesor = ?, salon = ? WHERE id = ?", (
-                nuevos_datos['profesor'], nuevos_datos['salon'], opcion_id
-            ))
+        cursor.execute("SELECT id FROM materias WHERE LOWER(nombre) = LOWER(?)", (nuevos_datos['nombre'],))
+        ids_materias = [row[0] for row in cursor.fetchall()]
+        if not ids_materias:
+            return False
 
-            cursor.execute("DELETE FROM bloques WHERE opcion_id = ?", (opcion_id,))
-            sql_bloque = "INSERT INTO bloques (opcion_id, dia, hora_inicio, hora_fin) VALUES (?, ?, ?, ?)"
-            for bloque in nuevos_datos['bloques']:
-                cursor.execute(sql_bloque, (
-                    opcion_id,
-                    bloque['dia'],
-                    bloque['inicio'],
-                    bloque['fin']
-                ))
-        else:
-            _insertar_opcion_y_bloques(cursor, id_materia, nuevos_datos)
+        cursor.execute(
+            f"DELETE FROM opciones WHERE materia_id IN ({','.join(['?'] * len(ids_materias))})",
+            ids_materias
+        )
+
+        id_base = ids_materias[0]
+        for opcion in nuevos_datos.get('opciones', []):
+            _insertar_opcion_y_bloques(cursor, id_base, opcion)
 
         conn.commit()
         return True
