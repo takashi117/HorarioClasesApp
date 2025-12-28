@@ -119,19 +119,28 @@ class VentanaPrincipal(QMainWindow):
 
     def abrir_dialogo_agregar(self):
         dialogo = DialogoMateria(self)
-        if dialogo.exec(): 
+        if dialogo.exec():
             datos = dialogo.obtener_datos()
-            if database.insertar_materia_completa(datos):
-                self.cargar_lista_materias() 
+            id_existente = database.obtener_materia_por_nombre(datos['nombre'])
+
+            if id_existente:
+                exito = database.insertar_opciones_para_materia(id_existente, datos['opciones'])
+                mensaje_exito = "Se agregaron nuevas alternativas a la materia existente"
+            else:
+                exito = database.insertar_materia_completa(datos)
+                mensaje_exito = "Materia guardada correctamente"
+
+            if exito:
+                self.cargar_lista_materias()
                 self.actualizar_vista_global()
-                QMessageBox.information(self, "Exito", "Materia guardada correctamente")
+                QMessageBox.information(self, "Exito", mensaje_exito)
             else:
                 QMessageBox.critical(self, "Error", "No se pudo guardar la materia")
 
     def cargar_lista_materias(self):
         self.lista_materias.clear()
         materias = database.obtener_todas_las_materias()
-        contador = 1 
+        contador = 1
         for id_mat, nombre in materias:
             item = QListWidgetItem(f"{contador}. {nombre}")
             item.setData(Qt.UserRole, id_mat) 
@@ -163,12 +172,12 @@ class VentanaPrincipal(QMainWindow):
 
     def editar_materia_seleccionada(self, item):
         id_materia = item.data(Qt.UserRole)
-        datos_actuales = database.obtener_materia_por_id(id_materia)
+        datos_actuales = database.obtener_materia_con_opciones(id_materia)
         if not datos_actuales: return
 
         dialogo = DialogoMateria(self)
         dialogo.cargar_datos_para_editar(datos_actuales)
-        
+
         if dialogo.exec():
             nuevos_datos = dialogo.obtener_datos()
             if database.actualizar_materia_existente(id_materia, nuevos_datos):
