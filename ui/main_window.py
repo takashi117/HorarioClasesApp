@@ -119,19 +119,28 @@ class VentanaPrincipal(QMainWindow):
 
     def abrir_dialogo_agregar(self):
         dialogo = DialogoMateria(self)
-        if dialogo.exec(): 
+        if dialogo.exec():
             datos = dialogo.obtener_datos()
-            if database.insertar_materia_completa(datos):
-                self.cargar_lista_materias() 
+            id_existente = database.obtener_materia_por_nombre(datos['nombre'])
+
+            if id_existente:
+                exito = database.insertar_opciones_para_materia(id_existente, datos['opciones'])
+                mensaje_exito = "Se agregaron nuevas alternativas a la materia existente"
+            else:
+                exito = database.insertar_materia_completa(datos)
+                mensaje_exito = "Materia guardada correctamente"
+
+            if exito:
+                self.cargar_lista_materias()
                 self.actualizar_vista_global()
-                QMessageBox.information(self, "Exito", "Materia guardada correctamente")
+                QMessageBox.information(self, "Exito", mensaje_exito)
             else:
                 QMessageBox.critical(self, "Error", "No se pudo guardar la materia")
 
     def cargar_lista_materias(self):
         self.lista_materias.clear()
         materias = database.obtener_todas_las_materias()
-        contador = 1 
+        contador = 1
         for id_mat, nombre in materias:
             item = QListWidgetItem(f"{contador}. {nombre}")
             item.setData(Qt.UserRole, id_mat) 
@@ -163,12 +172,12 @@ class VentanaPrincipal(QMainWindow):
 
     def editar_materia_seleccionada(self, item):
         id_materia = item.data(Qt.UserRole)
-        datos_actuales = database.obtener_materia_por_id(id_materia)
+        datos_actuales = database.obtener_materia_con_opciones(id_materia)
         if not datos_actuales: return
 
         dialogo = DialogoMateria(self)
         dialogo.cargar_datos_para_editar(datos_actuales)
-        
+
         if dialogo.exec():
             nuevos_datos = dialogo.obtener_datos()
             if database.actualizar_materia_existente(id_materia, nuevos_datos):
@@ -186,14 +195,14 @@ class VentanaPrincipal(QMainWindow):
         try:
             cursor = conn.cursor()
             query = """
-                SELECT m.nombre, o.profesor, o.salon, b.dia, b.hora_inicio, b.hora_fin
+                SELECT m.nombre, o.profesor, COALESCE(b.salon, o.salon), b.dia, b.hora_inicio, b.hora_fin
                 FROM bloques b
                 JOIN opciones o ON b.opcion_id = o.id
                 JOIN materias m ON o.materia_id = m.id
             """
             cursor.execute(query)
             filas = cursor.fetchall()
-            
+
             colores_materias = {}
             for nombre, prof, salon, dia, inicio, fin in filas:
                 if nombre not in colores_materias:
@@ -214,7 +223,7 @@ class VentanaPrincipal(QMainWindow):
         
         cursor = conn.cursor()
         query = """
-            SELECT m.nombre, o.id, o.profesor, o.salon, b.dia, b.hora_inicio, b.hora_fin
+            SELECT m.nombre, o.id, o.profesor, COALESCE(b.salon, o.salon), b.dia, b.hora_inicio, b.hora_fin
             FROM bloques b
             JOIN opciones o ON b.opcion_id = o.id
             JOIN materias m ON o.materia_id = m.id
@@ -222,7 +231,7 @@ class VentanaPrincipal(QMainWindow):
         cursor.execute(query)
         filas = cursor.fetchall()
         conn.close()
-        
+
         agrupacion = {}
         for nombre, id_op, prof, salon, dia, inicio, fin in filas:
             if nombre not in agrupacion: agrupacion[nombre] = {}
@@ -230,10 +239,12 @@ class VentanaPrincipal(QMainWindow):
                 agrupacion[nombre][id_op] = {
                     "profesor": prof, "salon": salon, "bloques_obj": []
                 }
-            
+
             min_inicio = engine.convertir_hora_a_minutos(inicio)
             min_fin = engine.convertir_hora_a_minutos(fin)
-            agrupacion[nombre][id_op]["bloques_obj"].append(engine.Bloque(dia, min_inicio, min_fin))
+            agrupacion[nombre][id_op]["bloques_obj"].append(
+                engine.Bloque(dia, min_inicio, min_fin, salon)
+            )
             
         lista_materias_motor = []
         id_falso = 1
@@ -294,8 +305,8 @@ class VentanaPrincipal(QMainWindow):
             color = colores_por_materia[opcion.nombre_materia]
             for bloque in opcion.bloques:
                 self.grid_resultados.pintar_bloque(
-                    opcion.nombre_materia, opcion.profesor, opcion.salon,
-                    bloque.dia, engine.minutos_a_hora(bloque.hora_inicio), 
+                    opcion.nombre_materia, opcion.profesor, bloque.salon,
+                    bloque.dia, engine.minutos_a_hora(bloque.hora_inicio),
                     engine.minutos_a_hora(bloque.hora_fin), color
                 )
 
