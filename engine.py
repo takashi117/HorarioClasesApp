@@ -8,6 +8,7 @@ class Bloque:
     dia: str          # Ej: "Lunes"
     hora_inicio: int  # Minutos desde las 00:00 (Ej: 13:00 -> 780)
     hora_fin: int     # Minutos desde las 00:00
+    salon: str        # Salon especifico del bloque
 
 @dataclass
 class Opcion:
@@ -97,16 +98,16 @@ if __name__ == "__main__":
     
     # Creamos datos falsos para probar
     # Materia 1: Matematicas (Lunes 8-10)
-    b1 = Bloque("Lunes", convertir_hora_a_minutos("08:00"), convertir_hora_a_minutos("10:00"))
+    b1 = Bloque("Lunes", convertir_hora_a_minutos("08:00"), convertir_hora_a_minutos("10:00"), "A1")
     op1 = Opcion(1, "Prof. A", "101", [b1])
     mat1 = Materia(1, "Matematicas", [op1])
 
     # Materia 2: Fisica (Lunes 9-11) -> Deberia chocar con Matematicas
-    b2 = Bloque("Lunes", convertir_hora_a_minutos("09:00"), convertir_hora_a_minutos("11:00"))
+    b2 = Bloque("Lunes", convertir_hora_a_minutos("09:00"), convertir_hora_a_minutos("11:00"), "B1")
     op2 = Opcion(2, "Prof. B (Choque)", "102", [b2])
     
     # Materia 2: Fisica (Lunes 10-12) -> No deberia chocar
-    b3 = Bloque("Lunes", convertir_hora_a_minutos("10:00"), convertir_hora_a_minutos("12:00"))
+    b3 = Bloque("Lunes", convertir_hora_a_minutos("10:00"), convertir_hora_a_minutos("12:00"), "B2")
     op3 = Opcion(3, "Prof. C (Valido)", "103", [b3])
     
     mat2 = Materia(2, "Fisica", [op2, op3])
